@@ -13,7 +13,7 @@
 #include <xcb/xcb.h>
 #include <err.h>
 
-#define SOCKET_PATH_TPL "/tmp/bspwm:%i-socket"
+#define SOCKET_PATH_TPL "/tmp/bspwm_%i_%i-socket"
 #define SOCKET_ENV_VAR  "BSPWM_SOCKET"
 
 enum {
@@ -25,20 +25,19 @@ enum {
 	MSG_LENGTH
 };
 
-#define COLOR_DARK     "#555555"
-#define COLOR_CRITICAL "#FF0000"
+#define COLOR_CRITICAL "#FFFF0000"
 
-#define COLOR_DEFAULT_FG "#FFA3A6AB"
-#define COLOR_DEFAULT_BG "#FF34322E"
+#define COLOR_DEFAULT_FG "#FF303030"
+#define COLOR_DEFAULT_BG "#FFFDF6E3"
 #define FORMAT_RESET     "%%{F-}%%{B-}%%{U-}"
 
 #define FORMAT_FOCUSED_FREE     "%%{F#FFF6F9FF}%%{B#FF6D561C}"
 #define FORMAT_FOCUSED_URGENT   "%%{F#FF34322E}%%{B#FFF9A299}"
 #define FORMAT_FOCUSED_OCCUPIED "%%{F#FFF6F9FF}%%{B#FF6D561C}"
-#define FORMAT_FREE             "%%{F#FF6F7277}%%{B#FF34322E}"
-#define FORMAT_URGENT           "%%{F#FFF9A299}%%{B#FF34322E}"
-#define FORMAT_OCCUPIED         "%%{F#FFA2A6AB}%%{B#FF34322E}"
-#define FORMAT_LAYOUT           "%%{F#FFA3A6AB}%%{B#FF34322E}"
+#define FORMAT_FREE             "%%{F-}%%{B-}"
+#define FORMAT_URGENT           "%%{F-}%%{Bred}"
+#define FORMAT_OCCUPIED         "%%{F-}%%{B-}"
+#define FORMAT_LAYOUT           "%%{F-}%%{B-}"
 
 #define BATLOW 5
 #define BATFULL 50
@@ -62,7 +61,7 @@ static void print_to_bar()
 {
 	pthread_mutex_lock(&mutex);
 
-	fprintf(out, "%%{" FORMAT_RESET "}%%{l}%s %%{r} %s  %s  %s  %s\n",
+	fprintf(out, FORMAT_RESET "%%{l}%s %%{r} %s  %s  %s  %s\n",
 		bar_data.wm_string, bar_data.mpd, bar_data.volume, bar_data.battery, bar_data.date);
 	fflush(out);
 	bar_data.modified = false;
@@ -207,7 +206,7 @@ static void update_battery()
 		snprintf(buffer, sizeof buffer, "\uE041 %s", batbuf);
 		is_battery_ok = 1;
 	} else if (percentage <= BATLOW) {
-		snprintf(buffer, sizeof buffer, "\uE031 %s", batbuf);
+		snprintf(buffer, sizeof buffer, COLOR_CRITICAL "\uE031 %s", batbuf);
 
 		if (is_battery_ok) {
 			NotifyNotification *msg;
@@ -351,8 +350,7 @@ static void parse_wm(const char *buffer)
 {
 	const char *end;
 	const char *start;
-	int len, catlen;
-	char line[64];
+	int len;
 
 	if (!*buffer) {
 		return;
@@ -389,10 +387,10 @@ static void parse_wm(const char *buffer)
 			len += snprintf(bar_data.wm_string + len, sizeof bar_data.wm_string - len,
 				FORMAT_OCCUPIED " %.*s ", end - start - 1, &start[1]);
 			break;
-		case 'f': // free desktop
+//		case 'f': // free desktop
 //			len += snprintf(bar_data.wm_string + len, sizeof bar_data.wm_string - len,
 //				FORMAT_FREE " %.*s ", end - start - 1, &start[1]);
-			break;
+//			break;
 		case 'u': // urgent desktop
 			len += snprintf(bar_data.wm_string + len, sizeof bar_data.wm_string - len,
 				FORMAT_URGENT " %.*s ", end - start - 1, &start[1]);
@@ -440,7 +438,7 @@ static void * tfunc_wm(void *data)
 		char *host = NULL;
 		int dn = 0, sn = 0;
 		if (xcb_parse_display(NULL, &host, &dn, &sn) != 0) {
-			snprintf(sock_address.sun_path, sizeof sock_address.sun_path, SOCKET_PATH_TPL, dn);
+			snprintf(sock_address.sun_path, sizeof sock_address.sun_path, SOCKET_PATH_TPL, dn, sn);
 		}
 		free(host);
 	}
@@ -462,12 +460,17 @@ static void * tfunc_wm(void *data)
 				warn("Invalid syntax.\n");
 			}
 		} else {
-			int end = MIN(nb, (int) sizeof(rsp) - 1);
+			int end = MIN(nb, (int) sizeof rsp - 1);
+			int start;
 			rsp[end--] = '\0';
 			while (end >= 0 && isspace(rsp[end])) {
 				rsp[end--] = '\0';
 			}
-			parse_wm(rsp);
+			start = end;
+			while (start > 0 && rsp[start] != '\n') {
+				start--;
+			}
+			parse_wm(&rsp[start]);
 			print_to_bar();
 		}
 	}
