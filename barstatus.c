@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <ctype.h>
 #include <pthread.h>
@@ -8,7 +9,6 @@
 #include <time.h>
 #include <signal.h>
 #include <alsa/asoundlib.h>
-#include <mpd/client.h>
 #include <libnotify/notify.h>
 #include <xcb/xcb.h>
 #include <err.h>
@@ -49,7 +49,6 @@ static pthread_mutex_t mutex;
 
 static struct {
 	char wm_string[1024];
-	char mpd[64];
 	char volume[16];
 	char date[32];
 	char battery[32];
@@ -61,8 +60,8 @@ static void print_to_bar()
 {
 	pthread_mutex_lock(&mutex);
 
-	fprintf(out, FORMAT_RESET "%%{l}%s %%{r} %s  %s  %s  %s\n",
-		bar_data.wm_string, bar_data.mpd, bar_data.volume, bar_data.battery, bar_data.date);
+	fprintf(out, FORMAT_RESET "%%{l}%s %%{r} %s  %s  %s\n",
+		bar_data.wm_string, bar_data.volume, bar_data.battery, bar_data.date);
 	fflush(out);
 	bar_data.modified = false;
 
@@ -84,80 +83,6 @@ static void escape_quotes_nl(char *str)
 	strncpy(str, tmp, k);
 	str[k] = '\0';
 	free(tmp);
-}
-
-static void * tfunc_mpd(void *data)
-{
-	char mpdbuf[sizeof bar_data.mpd];
-	char *icon;
-	struct mpd_connection *conn;
-	bool first_run = true;
-	enum mpd_idle idle;
-
-	conn = mpd_connection_new(NULL, 0, 0);
-	if (!conn) {
-		return 0;
-	}
-
-	while (running) {
-		struct mpd_song *song;
-		struct mpd_status *status;
-
-		if (!first_run) {
-			idle = mpd_run_idle_mask(conn, MPD_IDLE_PLAYER);
-			if (!idle) {
-				puts(mpd_connection_get_error_message(conn));
-				sleep(1);
-				break;
-			} else if (!(idle & MPD_IDLE_PLAYER)) {
-				continue;
-			}
-		}
-
-		first_run = false;
-
-		song = mpd_run_current_song(conn);
-		if (!song) {
-			continue;
-		}
-
-		status = mpd_run_status(conn);
-		if (!status) {
-			mpd_song_free(song);
-			continue;
-		}
-
-		switch (mpd_status_get_state(status)) {
-		case MPD_STATE_PLAY:
-			icon = "\uE09A";
-			break;
-		case MPD_STATE_PAUSE:
-			icon = "\uE09B";
-			break;
-		default:
-			icon = NULL;
-		}
-
-		if (icon) {
-			snprintf(mpdbuf, sizeof mpdbuf, "%s %s - %s", icon,
-				mpd_song_get_tag(song, MPD_TAG_ARTIST, 0), mpd_song_get_tag(song, MPD_TAG_TITLE, 0));
-			escape_quotes_nl(mpdbuf);
-		} else {
-			mpdbuf[0] = 0;
-		}
-
-		mpd_status_free(status);
-		mpd_song_free(song);
-
-		if (strcmp(bar_data.mpd, mpdbuf)) {
-			pthread_mutex_lock(&mutex);
-			strcpy(bar_data.mpd, mpdbuf);
-			pthread_mutex_unlock(&mutex);
-			print_to_bar();
-		}
-	}
-
-	mpd_connection_free(conn);
 }
 
 static void update_date()
@@ -479,7 +404,7 @@ static void * tfunc_wm(void *data)
 
 int main()
 {
-	pthread_t thread_wm, thread_mpd, thread_timer, thread_alsa;
+	pthread_t thread_wm, thread_timer, thread_alsa;
 	int pin[2];
 	pid_t pid;
 
@@ -508,7 +433,6 @@ int main()
 	notify_init("barstatus");
 
 	pthread_create(&thread_wm, NULL, tfunc_wm, NULL);
-	pthread_create(&thread_mpd, NULL, tfunc_mpd, NULL);
 	pthread_create(&thread_timer, NULL, tfunc_timer, NULL);
 	pthread_create(&thread_alsa, NULL, tfunc_alsa, NULL);
 
@@ -517,12 +441,10 @@ int main()
 	running = false;
 
 	pthread_cancel(thread_wm);
-	pthread_cancel(thread_mpd);
 	pthread_cancel(thread_timer);
 	pthread_cancel(thread_alsa);
 
 	pthread_join(thread_wm, NULL);
-	pthread_join(thread_mpd, NULL);
 	pthread_join(thread_timer, NULL);
 	pthread_join(thread_alsa, NULL);
 
